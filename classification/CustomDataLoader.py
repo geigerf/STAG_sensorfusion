@@ -28,7 +28,7 @@ class CustomDataLoader(data.Dataset):
             # At data[:, 0] is a list containing all pressure frames
             # At data[:, 1] is a list containing the corresponding IMU data
             self.original_data = data
-            self.original_data[:, 0] = self.original_data[:, 0].reshape(len(labels), 32*32)
+            #self.original_data[:, 0] = self.original_data[:, 0].reshape((len(labels),32*32))
             self.original_labels = labels
             self.balance_data()
         self.collate_data()
@@ -38,7 +38,12 @@ class CustomDataLoader(data.Dataset):
 
 
     def __getitem__(self, idx):
-        pressure_imu = torch.from_numpy(self.collated_data[idx])
+        pressure_imu = []
+        pressure_imu.append(self.collated_data[idx][0])
+        pressure_imu[0] = pressure_imu[0].reshape((32, 32))
+        pressure_imu[0] = np.expand_dims(pressure_imu[0], axis=0)
+        pressure_imu[0] = torch.from_numpy(pressure_imu[0])
+        pressure_imu.append(torch.from_numpy(self.collated_data[idx][1]))
         if self.augment:
             noise = torch.randn_like(pressure_imu[0]) * 0.015#0.015
             pressure_imu[0] += noise
@@ -58,9 +63,8 @@ class CustomDataLoader(data.Dataset):
         """
         
         self.collated_data = self.data
-        self.collated_data[:,0] = np.expand_dims(self.collated_data[:,0], axis=1)
         self.collated_labels = self.labels
-        # shuffling is taken care of by the torch.utils.data.DataLoader
+        # shuffle
         self.collated_data,\
             self.collated_labels = shuffle(self.collated_data,
                                            self.collated_labels)
@@ -121,7 +125,7 @@ class CustomDataLoader(data.Dataset):
             resampled_data = self.original_data
             resampled_labels = self.original_labels
                 
-        self.data[:,0] = resampled_data[:,0].reshape((len(resampled_labels), 32, 32))
+        self.data = resampled_data
         self.labels = resampled_labels
  
     

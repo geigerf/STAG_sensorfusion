@@ -16,7 +16,7 @@ from shared.resnet_3x3 import resnet18
 
 class SmallNet(nn.Module):
     '''
-    This model extract features for each single input frame.
+    This model extract features from tactile data.
     '''
     def __init__(self, inplanes=16, dropout=0):
         super(SmallNet, self).__init__()
@@ -27,6 +27,24 @@ class SmallNet(nn.Module):
     def forward(self, pressure):
         x = self.features(pressure)
         return x
+    
+    
+class IMUnet(nn.Module):
+    '''
+    This model extract features from IMU data.
+    '''
+    def __init__(self, imu_in=6, imu_out=3, hidden_units=12, imu_dropout=0):
+        super(IMUnet, self).__init__()
+        self.in_layer = nn.Linear(imu_in, hidden_units)
+        self.dropout = nn.Dropout(p=imu_dropout, inplace=False)
+        self.out_layer = nn.Linear(hidden_units, imu_out)
+        
+        
+    def forward(self, imu):
+        x = self.in_layer(imu)
+        x = self.dropout(x)
+        x = self.out_layer(x)
+        return x
 
 
 class TouchNet(nn.Module):
@@ -34,10 +52,10 @@ class TouchNet(nn.Module):
     This model represents our classification network for 1..N input frames.
     '''
     def __init__(self, num_classes=27, inplanes=16, dropout=0,
-                 imu_in=6, imu_out=3):
+                 imu_in=6, imu_out=3, imu_hidden=12, imu_dropout=0):
         super(TouchNet, self).__init__()
         self.Tactilenet = SmallNet(inplanes=inplanes, dropout=dropout)
-        self.IMUnet = nn.Linear(imu_in, imu_out)
+        self.IMUnet = IMUnet(imu_in, imu_out, imu_hidden, imu_dropout)
         self.combination = nn.Conv2d(inplanes*2, inplanes*2,
                                       kernel_size=1, padding=0)
         self.classifier = nn.Linear(inplanes*2 + imu_out, num_classes)
@@ -55,7 +73,7 @@ class TouchNet(nn.Module):
         # Different way to do the same thing
         x0 = torch.nn.Flatten()(x0)
         x1 = self.IMUnet(x[1])
-        x = torch.cat([x0, x1])
+        x = torch.cat([x0, x1], dim=1)
         x = self.classifier(x)
         return x
 
@@ -70,7 +88,8 @@ class ClassificationModel(BaseModel):
 
 
     def initialize(self, numClasses, baseLr = 1e-3, inplanes=16, dropout=0,
-                   cuda=True):
+                   cuda=True, imu_in=6, imu_out=3, imu_hidden=12,
+                   imu_dropout=0):
         self.cuda = cuda
         BaseModel.initialize(self)
 
@@ -79,7 +98,8 @@ class ClassificationModel(BaseModel):
         self.numClasses = numClasses
 
         self.model = TouchNet(num_classes=self.numClasses, inplanes=inplanes,
-                              dropout=dropout)
+                              dropout=dropout, imu_in=imu_in, imu_out=imu_out,
+                              imu_hidden=imu_hidden, imu_dropout=imu_dropout)
         # Count number of trainable parameters
         self.ntParams = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         self.nParams = sum(p.numel() for p in self.model.parameters())
@@ -107,8 +127,7 @@ class ClassificationModel(BaseModel):
         self.dataProcessor = None
 
 
-    def step(self,
-             inputs, isTrain = True, params = {}):
+    def step(self, inputs, isTrain = True, params = {}):
         if isTrain:
             self.model.train()
             assert not inputs['objectId'] is None
@@ -116,12 +135,18 @@ class ClassificationModel(BaseModel):
             self.model.eval()
 
         if self.cuda:
-            pressure_imu = torch.autograd.Variable(inputs['pressure_imu'].cuda(),
+            pressure_imu = inputs['pressure_imu']
+            pressure_imu[0] = torch.autograd.Variable(inputs['pressure_imu'][0].cuda(),
+                                               requires_grad = isTrain)
+            pressure_imu[1] = torch.autograd.Variable(inputs['pressure_imu'][1].cuda(),
                                                requires_grad = isTrain)
             objectId = torch.autograd.Variable(inputs['objectId'].cuda(),
                                                requires_grad=False) if 'objectId' in inputs else None    
         else:
-            pressure_imu = torch.autograd.Variable(inputs['pressure_imu'],
+            pressure_imu = inputs['pressure_imu']
+            pressure_imu[0] = torch.autograd.Variable(inputs['pressure_imu'][0],
+                                               requires_grad = isTrain)
+            pressure_imu[1] = torch.autograd.Variable(inputs['pressure_imu'][1],
                                                requires_grad = isTrain)
             objectId = torch.autograd.Variable(inputs['objectId'],
                                                requires_grad=False) if 'objectId' in inputs else None
